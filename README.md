@@ -26,6 +26,26 @@ Translating a 2-hour Japanese/English lecture, documentary, or film with cloud L
 
 ## Quick Start (快速开始)
 
+### Option A: One-Line `npx` Install (Recommended / 最推荐)
+
+```bash
+# Install the Skill into Claude Code, Codex & Antigravity in one command
+npx local-sub-skill install
+# (Or directly from GitHub before npm propagation:)
+npx github:Jettlin927/local-sub-skill install
+
+# Pull Ollama Hy-MT2-1.8B + Faster-Whisper large-v3-turbo weights
+npx local-sub-skill setup
+
+# Translate an existing SRT file offline
+npx local-sub-skill translate lecture.en.srt lecture.zh.srt --source en --target zh
+
+# End-to-end local video -> Chinese .zh.srt
+npx local-sub-skill run /path/to/video.mp4 --language ja
+```
+
+### Option B: Direct Python Usage
+
 ### 1. Prerequisites
 - Python 3.10+
 - [Ollama](https://ollama.com/) running locally (`http://localhost:11434`)

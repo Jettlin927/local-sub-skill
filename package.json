@@ -1,0 +1,44 @@
+{
+  "name": "local-sub-skill",
+  "version": "1.0.0",
+  "description": "100% local video-to-Chinese subtitle (.zh.srt) CLI & AI Agent Skill powered by Faster-Whisper + Ollama Hy-MT2-1.8B",
+  "type": "module",
+  "license": "MIT",
+  "author": "Jett Lin <jettlin666@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jettlin927/local-sub-skill.git"
+  },
+  "homepage": "https://github.com/Jettlin927/local-sub-skill#readme",
+  "bugs": {
+    "url": "https://github.com/Jettlin927/local-sub-skill/issues"
+  },
+  "keywords": [
+    "subtitle",
+    "srt",
+    "translation",
+    "faster-whisper",
+    "ollama",
+    "hy-mt2",
+    "local-llm",
+    "claude-code-skill",
+    "codex-skill",
+    "ai-agent-skill"
+  ],
+  "bin": {
+    "local-sub-skill": "./bin/cli.mjs"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "SKILL.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "node --test tests/cli.test.mjs"
+  }
+}
