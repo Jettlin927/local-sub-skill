@@ -30,7 +30,8 @@
   },
   "files": [
     "bin/",
-    "scripts/",
+    "scripts/*.py",
+    "scripts/*.Modelfile",
     "SKILL.md",
     "README.md",
     "LICENSE"
