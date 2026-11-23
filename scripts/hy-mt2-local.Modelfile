@@ -1,0 +1,7 @@
+FROM hf.co/tencent/Hy-MT2-1.8B-GGUF:Q4_K_M
+TEMPLATE """<｜hy_begin▁of▁sentence｜>{{ if .System }}{{ .System }}<｜hy_place▁holder▁no▁3｜>{{ end }}<｜hy_User｜>{{ .Prompt }}<｜hy_Assistant｜>{{ .Response }}"""
+PARAMETER stop "<｜hy_place▁holder▁no▁2｜>"
+PARAMETER stop "<｜hy_place▁holder▁no▁8｜>"
+PARAMETER temperature 0
+PARAMETER num_ctx 4096
+PARAMETER num_predict 1024
