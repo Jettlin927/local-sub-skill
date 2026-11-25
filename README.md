@@ -89,4 +89,13 @@ PYTHONPATH=scripts python -m unittest discover -s tests -v
 
 ## License
 
-MIT — built by [@Jettlin927](https://github.com/Jettlin927). Also check out [AgentCostLab](https://jettlin927.github.io/agentcostlab/) for simulating AI Agent token costs!
+MIT — built by [@Jettlin927](https://github.com/Jettlin927).
+
+---
+
+## More Open-Source AI Tools by [@Jettlin927](https://github.com/Jettlin927)
+
+- **[AgentCostLab](https://jettlin927.github.io/agentcostlab/)** ([GitHub](https://github.com/Jettlin927/agentcostlab)) — Interactive O(N²) multi-turn AI agent loop & prompt caching cost simulator, live Pareto Frontier across 26 LLMs, plus `agentcost-lint` CLI / VS Code / Chrome extensions.
+- **[x402-mcp-agentcost](https://github.com/Jettlin927/x402-mcp-agentcost)** — Pay-per-call Cloudflare Workers MCP & x402 v2 (Base USDC) servers for Pareto LLM routing and audited **SEC EDGAR** financial/insider/13F data.
+- **[vibe-invest-us](https://github.com/Jettlin927/vibe-invest-us)** — Self-hosted US-equity portfolio & deterministic technical/SEC AI analysis workbench.
+
