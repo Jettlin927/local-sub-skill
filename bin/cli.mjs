@@ -123,6 +123,19 @@ function main(argv) {
   return 1;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+export function isInvokedAsMain(
+  argv1 = process.argv[1],
+  entryFile = __filename,
+  realpath = fs.realpathSync,
+) {
+  if (!argv1) return false;
+  try {
+    return realpath(argv1) === realpath(entryFile);
+  } catch {
+    return path.resolve(argv1) === path.resolve(entryFile);
+  }
+}
+
+if (isInvokedAsMain()) {
   process.exitCode = main(process.argv.slice(2));
 }
