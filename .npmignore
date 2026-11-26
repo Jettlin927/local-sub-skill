@@ -3,3 +3,7 @@
 tests/
 .local_subtitles/
 models/
+dist/
+docs/
+packaging/
+scripts/package_windows_bundle.py

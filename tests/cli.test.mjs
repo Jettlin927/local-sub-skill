@@ -47,9 +47,11 @@ test('packed node_modules/.bin entrypoint prints help output on --help', () => {
   const shellOpts = process.platform === 'win32' ? { shell: true } : {};
 
   try {
+    const npmEnv = { ...process.env, npm_config_cache: path.join(tmpDir, 'npm-cache') };
     const packRes = spawnSync(npmCmd, ['pack', '--pack-destination', tmpDir], {
       cwd: PKG_ROOT,
       encoding: 'utf8',
+      env: npmEnv,
       ...shellOpts,
     });
     assert.equal(packRes.status, 0, `npm pack failed: ${packRes.stderr}`);
@@ -67,7 +69,7 @@ test('packed node_modules/.bin entrypoint prints help output on --help', () => {
     const installRes = spawnSync(
       npmCmd,
       ['install', '--no-audit', '--no-fund', '--offline', tgzPath],
-      { cwd: consumerDir, encoding: 'utf8', ...shellOpts },
+      { cwd: consumerDir, encoding: 'utf8', env: npmEnv, ...shellOpts },
     );
     assert.equal(installRes.status, 0, `npm install failed: ${installRes.stderr}`);
 
@@ -87,6 +89,22 @@ test('packed node_modules/.bin entrypoint prints help output on --help', () => {
     assert.equal(runRes.status, 0, `bin --help failed: ${runRes.stderr}`);
     assert.match(runRes.stdout, /local-sub-skill/);
     assert.match(runRes.stdout, /npx local-sub-skill install/);
+    assert.match(runRes.stdout, /npx local-sub-skill batch/);
+    assert.match(runRes.stdout, /npx local-sub-skill gui/);
+    assert.match(runRes.stdout, /npx local-sub-skill doctor/);
+    assert.match(runRes.stdout, /--bilingual/);
+    assert.match(runRes.stdout, /--ass/);
+    assert.match(runRes.stdout, /--glossary/);
+    assert.match(runRes.stdout, /\.vtt/);
+    assert.match(runRes.stdout, /--subtitles-only/);
+
+    const verRes = spawnSync(binPath, ['--version'], {
+      cwd: consumerDir,
+      encoding: 'utf8',
+      ...shellOpts,
+    });
+    assert.equal(verRes.status, 0, `bin --version failed: ${verRes.stderr}`);
+    assert.equal(verRes.stdout.trim(), '1.4.0');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

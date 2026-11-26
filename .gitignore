@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .local_subtitles/
 models/
+dist/
+*.tgz
 *.srt
 *.mp4
 *.mkv

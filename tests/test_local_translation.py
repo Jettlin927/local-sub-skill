@@ -404,6 +404,110 @@ class LocalTranslationTests(unittest.TestCase):
         self.assertEqual(stats["prompt_eval_cached_count"], 25)
         self.assertEqual(stats["cache_hits"], 0)
 
+    def test_bilingual_srt_supports_zh_first_source_first_and_passthrough_dedupe(self):
+        cues = [
+            local.Cue("1", self.cues[0].timing, "What are you doing?"),
+            local.Cue("2", self.cues[1].timing, "..."),
+        ]
+        local.write_srt(self.source, cues)
+        bilingual_zh_first = self.root / "电影.bilingual.srt"
+        with self.fake_api(["[1] 你在做什么？"]):
+            stats = self.run_translation(bilingual_path=bilingual_zh_first, bilingual_order="zh-first")
+        self.assertEqual(stats["bilingual_srt"], str(bilingual_zh_first))
+        parsed_zh_first = local.parse_srt(bilingual_zh_first)
+        self.assertEqual([c.text for c in parsed_zh_first], ["你在做什么？\nWhat are you doing?", "..."])
+        self.assertEqual([(c.index, c.timing) for c in parsed_zh_first], [(c.index, c.timing) for c in cues])
+
+        bilingual_src_first = self.root / "电影.src.bilingual.srt"
+        local.write_bilingual_srt(self.source, self.target, bilingual_src_first, order="source-first")
+        parsed_src_first = local.parse_srt(bilingual_src_first)
+        self.assertEqual([c.text for c in parsed_src_first], ["What are you doing?\n你在做什么？", "..."])
+        self.assertEqual(local.default_bilingual_path(self.target), self.root / "电影.bilingual.srt")
+
+    def test_invalid_bilingual_order_fails_before_api_call(self):
+        with self.fake_api([]):
+            with self.assertRaisesRegex(ValueError, "Unsupported bilingual order"):
+                self.run_translation(bilingual_path=self.root / "out.bilingual.srt", bilingual_order="invalid")
+        self.assertEqual(self.requests, [])
+
+    def test_webvtt_parses_normalizes_tags_and_translates_to_bilingual_srt(self):
+        vtt_path = self.root / "yt_lecture.en.vtt"
+        vtt_path.write_text(
+            "WEBVTT\nKind: captions\nLanguage: en\n\n"
+            "NOTE skip this comment\n\n"
+            "STYLE\n::cue { color: white; }\n\n"
+            "00:01.200 --> 00:03.400 align:start position:0%\n"
+            "<c>Hello</c><00:00:01.500><c> &amp; welcome</c>\n"
+            "Hello &amp; welcome\n\n"
+            "intro-2\n"
+            "01:02:03.000 --> 01:02:05.500\n"
+            "<v Host>Let's&nbsp;begin.\n",
+            encoding="utf-8",
+        )
+        parsed = local.parse_subtitles(vtt_path)
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0], local.Cue("1", "00:00:01,200 --> 00:00:03,400", "Hello & welcome"))
+        self.assertEqual(parsed[1], local.Cue("2", "01:02:03,000 --> 01:02:05,500", "Let's begin."))
+
+        derived_target = local.derive_target_srt_path(vtt_path)
+        self.assertEqual(derived_target, self.root / "yt_lecture.zh.srt")
+        bilingual_path = local.default_bilingual_path(derived_target)
+        with self.fake_api(["[1] 你好，欢迎。\n[2] 我们开始吧。"]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                stats = local.translate_srt(
+                    vtt_path,
+                    derived_target,
+                    source="en",
+                    cache_path=self.cache,
+                    checkpoint_path=self.checkpoint,
+                    retries=0,
+                    bilingual_path=bilingual_path,
+                )
+        self.assertEqual(stats["cue_count"], 2)
+        self.assertEqual(local.validate_pair(vtt_path, derived_target), [])
+        bi_cues = local.parse_srt(bilingual_path)
+        self.assertEqual(bi_cues[0].text, "你好，欢迎。\nHello & welcome")
+        self.assertEqual(bi_cues[1].timing, "01:02:03,000 --> 01:02:05,500")
+
+    def test_glossary_parsing_prompt_injection_and_cache_invalidation(self):
+        parsed = local.parse_glossary_text("# comment\nAgent = 智能体\nRAG => 检索增强生成\nMCP\t模型上下文协议\n")
+        self.assertEqual(parsed, {"Agent": "智能体", "RAG": "检索增强生成", "MCP": "模型上下文协议"})
+        self.assertEqual(local.parse_glossary_text('{"Agent": "智能体"}'), {"Agent": "智能体"})
+        with self.assertRaises(ValueError):
+            local.parse_glossary_text("invalid line without separator")
+
+        glossary_file = self.root / "glossary.txt"
+        glossary_file.write_text("Agent = 智能体\n", encoding="utf-8")
+        with self.fake_api(["[1] 智能体你在做什么？\n过来。\n[2] 我要回家了。\n[3] 晚安。"]):
+            first = self.run_translation()
+        self.assertEqual(first["glossary_count"], 1)
+        self.assertIn("Agent->智能体", self.requests[0]["prompt"])
+
+        # Updating glossary must invalidate prior cache/checkpoint automatically.
+        glossary_file.write_text("Agent = 代理\n", encoding="utf-8")
+        with self.fake_api(["[1] 代理你在做什么？\n过来。\n[2] 我要回家了。\n[3] 晚安。"]):
+            second = self.run_translation()
+        self.assertEqual(second["request_count"], 1)
+        self.assertEqual(second["cache_hits"], 0)
+        self.assertIn("代理你在做什么？", local.parse_srt(self.target)[0].text)
+
+    def test_bilingual_ass_export_formats_styles_and_timings(self):
+        cues = [
+            local.Cue("1", "00:00:01,234 --> 00:00:03,000", "Hello {world}\nNext line"),
+            local.Cue("2", "00:00:04,000 --> 00:00:05,500", "OK"),
+        ]
+        local.write_srt(self.source, cues)
+        ass_path = local.default_ass_path(self.target)
+        self.assertEqual(ass_path, self.root / "电影.bilingual.ass")
+        with self.fake_api(["[1] 你好世界\n下一行\n[2] 好的"]):
+            stats = self.run_translation(ass_path=ass_path, bilingual_order="source-first")
+        self.assertEqual(stats["bilingual_ass"], str(ass_path))
+        ass_text = ass_path.read_text(encoding="utf-8")
+        self.assertIn("Style: PrimaryZh,", ass_text)
+        self.assertIn("Style: SecondarySrc,", ass_text)
+        self.assertIn(r"Dialogue: 0,0:00:01.23,0:00:03.00,PrimaryZh,,0,0,0,,{\rSecondarySrc}Hello \{world\}\NNext line\N{\rPrimaryZh}你好世界\N下一行", ass_text)
+        self.assertIn(r"Dialogue: 0,0:00:04.00,0:00:05.50,PrimaryZh,,0,0,0,,{\rSecondarySrc}OK\N{\rPrimaryZh}好的", ass_text)
+
 
 if __name__ == "__main__":
     unittest.main()

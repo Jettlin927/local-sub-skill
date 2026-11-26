@@ -9,6 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PKG_ROOT = path.resolve(__dirname, '..');
 const SCRIPTS_DIR = path.join(PKG_ROOT, 'scripts');
+const PKG_JSON = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, 'package.json'), 'utf8'));
 
 function detectPython() {
   const candidates = process.platform === 'win32' ? ['python', 'py', 'python3'] : ['python3', 'python'];
@@ -67,7 +68,7 @@ function runPythonScript(scriptName, forwardArgs) {
 }
 
 function printHelp() {
-  console.log(`local-sub-skill — 100% Local Video → Chinese Subtitle CLI & AI Agent Skill
+  console.log(`local-sub-skill v${PKG_JSON.version} — 100% Local Video → Chinese & Bilingual Subtitle CLI & AI Agent Skill
 
 Usage:
   npx local-sub-skill install [--agent claude|codex|antigravity|all]
@@ -76,11 +77,20 @@ Usage:
   npx local-sub-skill setup [--asr-model-dir <dir>] [--skip-whisper]
       Pull Ollama Hy-MT2-1.8B Q4_K_M and Faster-Whisper large-v3-turbo weights.
 
-  npx local-sub-skill translate <input.srt> <output.zh.srt> [--source ja|en|auto]
-      Translate an existing SRT subtitle file to Chinese completely offline.
+  npx local-sub-skill translate <input.srt|input.vtt> [output.zh.srt] [--source ja|en|auto] [--bilingual] [--ass] [--bilingual-order zh-first|source-first] [--glossary <file>]
+      Translate an existing .srt or WebVTT (.vtt) subtitle file to Chinese (plus .bilingual.srt / styled .bilingual.ass) offline.
 
-  npx local-sub-skill run <video.mp4> [--language ja|en|auto] [--dry-run]
+  npx local-sub-skill run <video.mp4> [--language ja|en|auto] [--bilingual] [--ass] [--bilingual-order zh-first|source-first] [--glossary <file>] [--dry-run]
       End-to-end local Faster-Whisper transcription + Ollama Hy-MT2-1.8B translation.
+
+  npx local-sub-skill batch <folder> [--recursive] [--subtitles-only] [--language ja|en|auto] [--bilingual] [--ass] [--glossary <file>] [--continue-on-error] [--dry-run]
+      Batch-generate .zh.srt (plus .bilingual.srt / .bilingual.ass) for every video and standalone .srt/.vtt file in a folder.
+
+  npx local-sub-skill gui [--port 8765] [--no-browser]
+      Launch the zero-dependency local Multi-File Drag-and-Drop Web Studio (127.0.0.1).
+
+  npx local-sub-skill doctor [--json] [--strict]
+      Check Ollama, hy-mt2-local, Faster-Whisper, and GPU/CPU readiness across Windows/macOS/Linux.
 `);
 }
 
@@ -88,6 +98,10 @@ function main(argv) {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') {
     printHelp();
+    return 0;
+  }
+  if (cmd === '-v' || cmd === '--version' || cmd === 'version') {
+    console.log(PKG_JSON.version);
     return 0;
   }
 
@@ -116,6 +130,18 @@ function main(argv) {
 
   if (cmd === 'run') {
     return runPythonScript('run_single_video.py', rest);
+  }
+
+  if (cmd === 'batch') {
+    return runPythonScript('run_batch.py', rest);
+  }
+
+  if (cmd === 'gui') {
+    return runPythonScript('gui.py', rest);
+  }
+
+  if (cmd === 'doctor') {
+    return runPythonScript('doctor.py', rest);
   }
 
   console.error(`Unknown command: ${cmd}\n`);

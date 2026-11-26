@@ -7,8 +7,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import subprocess
-
-from faster_whisper.utils import download_model
+import sys
 
 
 DEFAULT_MODEL_DIR = Path.cwd() / "models" / "faster-whisper-large-v3-turbo"
@@ -37,6 +36,13 @@ def main() -> None:
         check=True,
     )
     if not args.skip_whisper:
+        try:
+            from faster_whisper.utils import download_model
+        except ImportError as error:
+            raise SystemExit(
+                "faster-whisper Python package is required to download Whisper weights. "
+                "Install it with `pip install faster-whisper` or rerun with `--skip-whisper`."
+            ) from error
         args.asr_model_dir.mkdir(parents=True, exist_ok=True)
         download_model("turbo", output_dir=str(args.asr_model_dir))
     print(f"Local subtitle models are ready: hy-mt2-local (Ollama) and {args.asr_model_dir}.")
