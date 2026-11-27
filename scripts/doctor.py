@@ -13,7 +13,13 @@ import shutil
 import urllib.error
 import urllib.request
 
-from run_single_video import DEFAULT_ASR_MODEL, has_python_faster_whisper, resolve_default_fw_exe
+from run_single_video import (
+    DEFAULT_ASR_MODEL,
+    has_python_faster_whisper,
+    resolve_default_fw_exe,
+    resolve_ffmpeg_bin,
+    resolve_yt_dlp_bin,
+)
 
 
 def _probe_ollama(host: str, model: str, timeout: float = 2.0) -> dict:
@@ -51,6 +57,9 @@ def collect_diagnostics(
     fw_exe_found = resolved_fw_exe.exists() or shutil.which(str(resolved_fw_exe)) is not None
     py_fw = has_python_faster_whisper()
     asr_model_ready = (resolved_model_dir / "model.bin").is_file()
+    ffmpeg_found = resolve_ffmpeg_bin("ffmpeg") is not None
+    ffprobe_found = resolve_ffmpeg_bin("ffprobe") is not None
+    yt_dlp_found = resolve_yt_dlp_bin() is not None
 
     next_actions: list[str] = []
     if not ollama_cli:
@@ -86,12 +95,16 @@ def collect_diagnostics(
             "ollama_host": host,
             "translation_model": model,
             "translation_model_ready": ollama["model_ready"],
+            "ollama_models": ollama.get("models", []),
             "ollama_error": ollama.get("error"),
             "fw_exe": str(resolved_fw_exe),
             "fw_exe_found": fw_exe_found,
             "python_faster_whisper": py_fw,
             "asr_model_dir": str(resolved_model_dir),
             "asr_model_ready": asr_model_ready,
+            "ffmpeg_found": ffmpeg_found,
+            "ffprobe_found": ffprobe_found,
+            "yt_dlp_found": yt_dlp_found,
         },
         "next_actions": next_actions,
     }
@@ -109,6 +122,8 @@ def format_report(report: dict) -> str:
         f"  [faster-whisper-xxl]     {mark(c['fw_exe_found'])} ({c['fw_exe']})",
         f"  [Python faster-whisper]  {mark(c['python_faster_whisper'])}",
         f"  [ASR model.bin]          {mark(c['asr_model_ready'])} ({c['asr_model_dir']})",
+        f"  [ffmpeg / ffprobe]       {mark(c.get('ffmpeg_found') and c.get('ffprobe_found'))} (optional: --extract-subs / --mux / --burn)",
+        f"  [yt-dlp]                 {mark(c.get('yt_dlp_found'))} (optional: YouTube / Bilibili / URL input)",
         f"  Ready for .srt -> .zh.srt: {'YES' if report['srt_ready'] else 'NO'}",
         f"  Ready for video -> .srt:   {'YES' if report['asr_ready'] else 'NO'}",
     ]

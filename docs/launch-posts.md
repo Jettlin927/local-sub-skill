@@ -14,7 +14,18 @@
 
 ### C. `ancs21/awesome-openai-whisper` (110★ — under `## Applications`)
 ```markdown
-* [local-sub-skill - 100% local Faster-Whisper + Ollama Hy-MT2-1.8B video-to-Chinese & styled bilingual subtitle (`.zh.srt` / `.bilingual.ass`) CLI, Web Studio, and Claude/Codex skill](https://github.com/Jettlin927/local-sub-skill)
+* [local-sub-skill - 100% local Faster-Whisper + Ollama Hy-MT2-1.8B video-to-Chinese & styled bilingual subtitle (`.zh.srt` / `.bilingual.srt` / `.bilingual.ass` / `.bilingual.md`) CLI, Web Studio, and Claude/Codex skill](https://github.com/Jettlin927/local-sub-skill) ![](https://img.shields.io/github/stars/Jettlin927/local-sub-skill?style=social)
+```
+
+### D. `karanb192/awesome-claude-skills` (612★ — under `### Media & Content Creation`, alphabetical between `keyword-icons` and `ltx2-video`)
+```markdown
+| [local-sub-skill](https://github.com/Jettlin927/local-sub-skill) | Generate offline Chinese & bilingual subtitles from local videos, audio, URLs, or `.srt`/`.vtt` files using Faster-Whisper and Ollama. |
+```
+
+### E. `AIPMAndy/awesome-openclaw-skills-CN` (131★ — under `### Speech & Transcription` or `CHINESE-SKILLS.md`)
+*(Note: `heilcheng/awesome-agent-skills` 6.4k★ & `sindresorhus/awesome-whisper` 2.4k★ require 20★/100★ respectively — save for after initial traction.)*
+```markdown
+- [local-sub-skill](https://github.com/Jettlin927/local-sub-skill) - 100% 本地离线视频/播客音频/YouTube B站 URL 转中英双语字幕 (`.zh.srt` / `.bilingual.srt` / `.bilingual.ass` / `.bilingual.md`) Skill 与拖拽工作台，基于 Faster-Whisper + Ollama Hy-MT2-1.8B，支持 `npx local-sub-skill install --agent openclaw`。
 ```
 
 ---

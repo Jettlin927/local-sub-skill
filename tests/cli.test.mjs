@@ -9,10 +9,17 @@ import { getInstallTargets, installSkill, isInvokedAsMain } from '../bin/cli.mjs
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-test('getInstallTargets resolves claude, codex, antigravity, and all', () => {
+test('getInstallTargets resolves claude, codex, antigravity, cursor, openclaw, and all', () => {
   const fakeHome = path.join(os.tmpdir(), 'fake-home');
-  assert.equal(getInstallTargets('all', fakeHome).length, 3);
+  const allTargets = getInstallTargets('all', fakeHome);
+  assert.equal(allTargets.length, 5);
+  assert.deepEqual(
+    allTargets.map(([name]) => name),
+    ['claude', 'codex', 'antigravity', 'cursor', 'openclaw'],
+  );
   assert.equal(getInstallTargets('claude', fakeHome)[0][0], 'claude');
+  assert.equal(getInstallTargets('cursor', fakeHome)[0][0], 'cursor');
+  assert.equal(getInstallTargets('openclaw', fakeHome)[0][0], 'openclaw');
   assert.throws(() => getInstallTargets('invalid', fakeHome));
 });
 
@@ -94,9 +101,19 @@ test('packed node_modules/.bin entrypoint prints help output on --help', () => {
     assert.match(runRes.stdout, /npx local-sub-skill doctor/);
     assert.match(runRes.stdout, /--bilingual/);
     assert.match(runRes.stdout, /--ass/);
+    assert.match(runRes.stdout, /--notes/);
+    assert.match(runRes.stdout, /--extract-subs/);
+    assert.match(runRes.stdout, /--mux/);
+    assert.match(runRes.stdout, /--burn/);
+    assert.match(runRes.stdout, /zh-Hant/);
+    assert.match(runRes.stdout, /--model/);
     assert.match(runRes.stdout, /--glossary/);
+    assert.match(runRes.stdout, /--shift/);
     assert.match(runRes.stdout, /\.vtt/);
+    assert.match(runRes.stdout, /\.ass/);
     assert.match(runRes.stdout, /--subtitles-only/);
+    assert.match(runRes.stdout, /cursor\|openclaw/);
+    assert.match(runRes.stdout, /yt-dlp/);
 
     const verRes = spawnSync(binPath, ['--version'], {
       cwd: consumerDir,
@@ -104,7 +121,7 @@ test('packed node_modules/.bin entrypoint prints help output on --help', () => {
       ...shellOpts,
     });
     assert.equal(verRes.status, 0, `bin --version failed: ${verRes.stderr}`);
-    assert.equal(verRes.stdout.trim(), '1.4.0');
+    assert.equal(verRes.stdout.trim(), '1.8.0');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

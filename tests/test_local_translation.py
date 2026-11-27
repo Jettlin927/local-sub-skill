@@ -508,6 +508,118 @@ class LocalTranslationTests(unittest.TestCase):
         self.assertIn(r"Dialogue: 0,0:00:01.23,0:00:03.00,PrimaryZh,,0,0,0,,{\rSecondarySrc}Hello \{world\}\NNext line\N{\rPrimaryZh}你好世界\N下一行", ass_text)
         self.assertIn(r"Dialogue: 0,0:00:04.00,0:00:05.50,PrimaryZh,,0,0,0,,{\rSecondarySrc}OK\N{\rPrimaryZh}好的", ass_text)
 
+    def test_bilingual_markdown_notes_and_traditional_chinese_target(self):
+        cues = [
+            local.Cue("1", "00:00:01,234 --> 00:00:03,000", "Welcome\nto the lecture"),
+            local.Cue("2", "00:00:04,000 --> 00:00:05,500", "AI"),
+        ]
+        ko_source = self.root / "lecture.ko.srt"
+        local.write_srt(ko_source, cues)
+        hant_target = local.derive_target_srt_path(ko_source, target="zh-Hant")
+        self.assertEqual(hant_target, self.root / "lecture.zh-Hant.srt")
+        notes_path = local.default_notes_path(hant_target)
+        self.assertEqual(notes_path, self.root / "lecture.bilingual.md")
+
+        with self.fake_api(["[1] 歡迎來到\n這堂課\n[2] AI"]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                stats = local.translate_srt(
+                    ko_source,
+                    hant_target,
+                    source="ko",
+                    target="zh-Hant",
+                    cache_path=self.cache,
+                    checkpoint_path=self.checkpoint,
+                    retries=0,
+                    notes_path=notes_path,
+                )
+        self.assertEqual(stats["bilingual_md"], str(notes_path))
+        md_text = notes_path.read_text(encoding="utf-8")
+        self.assertIn("# lecture", md_text)
+        self.assertIn("- `00:00:01` **歡迎來到 這堂課**  \n  Welcome to the lecture", md_text)
+        self.assertIn("- `00:00:04` **AI**", md_text)
+        self.assertIn("韩语", local._prompt(["안녕하세요"], "ko", "zh-Hant", False))
+        self.assertIn("繁体中文", local._prompt(["안녕하세요"], "ko", "zh-Hant", False))
+
+    def test_non_chinese_target_language_translation_and_validation(self):
+        ja_source = self.root / "anime.ja.srt"
+        local.write_srt(ja_source, [local.Cue("1", "00:00:01,000 --> 00:00:02,500", "おはようございます")])
+        en_target = local.derive_target_srt_path(ja_source, target="en")
+        self.assertEqual(en_target, self.root / "anime.en.srt")
+        with self.fake_api(["[1] Good morning"]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                stats = local.translate_srt(
+                    ja_source,
+                    en_target,
+                    source="ja",
+                    target="en",
+                    cache_path=self.cache,
+                    checkpoint_path=self.checkpoint,
+                    retries=0,
+                )
+        self.assertEqual(stats["cue_count"], 1)
+        self.assertEqual(local.parse_srt(en_target)[0].text, "Good morning")
+        self.assertEqual(local.validate_pair(ja_source, en_target, check_cjk=False), [])
+
+    def test_ass_input_parsing_and_timestamp_shifting(self):
+        ass_source = self.root / "episode.ja.ass"
+        ass_source.write_text(
+            "\n".join(
+                [
+                    "[Script Info]",
+                    "Title: Demo Anime",
+                    "[Events]",
+                    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                    r"Dialogue: 0,0:00:01.20,0:00:03.50,Default,,0,0,0,,{\pos(960,900)\b1}おはようございます\N元気ですか",
+                    r"Dialogue: 0,0:00:04.00,0:00:05.00,Signs,,0,0,0,,{\p1}m 0 0 l 100 0 100 100{\p0}",
+                    r"Dialogue: 0,0:00:06.00,0:00:08.25,Default,,0,0,0,,すごい,ですね",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        parsed = local.parse_subtitles(ass_source)
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0].timing, "00:00:01,200 --> 00:00:03,500")
+        self.assertEqual(parsed[0].text, "おはようございます\n元気ですか")
+        self.assertEqual(parsed[1].text, "すごい,ですね")
+
+        shifted_target = local.derive_target_srt_path(ass_source, target="zh")
+        self.assertEqual(shifted_target, self.root / "episode.zh.srt")
+        with self.fake_api(["[1] 早上好\n你好吗\n[2] 真厉害啊"]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                stats = local.translate_srt(
+                    ass_source,
+                    shifted_target,
+                    source="ja",
+                    target="zh",
+                    cache_path=self.cache,
+                    checkpoint_path=self.checkpoint,
+                    retries=0,
+                    shift_seconds=-1.5,
+                )
+        self.assertEqual(stats["shift_seconds"], -1.5)
+        translated = local.parse_srt(shifted_target)
+        # First cue start clamps cleanly at 00:00:00,000 while end shifts to 00:00:02,000.
+        self.assertEqual(translated[0].timing, "00:00:00,000 --> 00:00:02,000")
+        self.assertEqual(translated[1].timing, "00:00:04,500 --> 00:00:06,750")
+        self.assertEqual(local.validate_pair(ass_source, shifted_target, shift_seconds=-1.5), [])
+
+        # Changing shift_seconds must invalidate prior cache/checkpoint automatically.
+        with self.fake_api(["[1] 早上好\n你好吗\n[2] 真厉害啊"]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                resynced = local.translate_srt(
+                    ass_source,
+                    shifted_target,
+                    source="ja",
+                    target="zh",
+                    cache_path=self.cache,
+                    checkpoint_path=self.checkpoint,
+                    retries=0,
+                    shift_seconds=2.0,
+                )
+        self.assertEqual(resynced["cache_hits"], 0)
+        self.assertEqual(resynced["request_count"], 1)
+        self.assertEqual(local.parse_srt(shifted_target)[0].timing, "00:00:03,200 --> 00:00:05,500")
+
 
 if __name__ == "__main__":
     unittest.main()

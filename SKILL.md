@@ -15,34 +15,37 @@ python scripts/setup_local_models.py --asr-model-dir ./models/faster-whisper-lar
 
 This pulls `hf.co/tencent/Hy-MT2-1.8B-GGUF:Q4_K_M`, creates the verified `hy-mt2-local` Ollama model using `scripts/hy-mt2-local.Modelfile`, and downloads `faster-whisper-large-v3-turbo`.
 
-## Workflow 1: Translate an Existing `.srt` or WebVTT (`.vtt`) File (Zero GPU / Ollama Only)
+## Workflow 1: Translate an Existing `.srt`, WebVTT (`.vtt`), or ASS/SSA (`.ass`/`.ssa`) File (Zero GPU / Ollama Only)
 
 ```bash
-python scripts/local_translation.py path/to/lecture.en.vtt --source en --target zh --bilingual --ass --glossary glossary.txt
+python scripts/local_translation.py path/to/lecture.en.vtt --source en --target zh --shift 1.5 --bilingual --ass --notes --glossary glossary.txt
 ```
 
-- Supports both `.srt` and YouTube/yt-dlp WebVTT (`.vtt`, stripping `<c>` / inline timestamp tags and normalizing `MM:SS.mmm` timestamps) while preserving exact SRT output timings (`00:00:01,234 --> 00:00:03,000`).
+- Supports `.srt`, YouTube/yt-dlp WebVTT (`.vtt`, stripping `<c>` / inline timestamp tags and normalizing `MM:SS.mmm` timestamps), and ASS/SSA (`.ass`/`.ssa`, stripping `{...}` override blocks and vector drawings) across `ja`, `en`, `ko`, `fr`, `de`, `es`, `ru`, `pt`, and `auto` -> `zh`, `zh-Hant`, `en`, `ja`, `ko`, `fr`, `de`, `es`, `ru`, or `pt`, plus `--shift <seconds>` for timestamp synchronization.
 - Supports custom terminology overrides via `--glossary` (`.json` or `source=target` text) or auto-discovered `.local-sub-glossary.txt` / `glossary.txt`, hashed into cache identity.
 - Automatically splits batches and falls back to single-cue translation if the 1.8B model drops an ID.
 - Persists model-digest-keyed translation caches and crash-safe checkpoints for instant resume.
 - Validates cue counts, non-empty lines, and low Japanese kana residue (`--max-kana-ratio`).
-- Pass `--bilingual` (plus `--ass` for styled `.bilingual.ass` dual-color PotPlayer/VLC/mpv subtitles and optional `--bilingual-order zh-first|source-first`) to emit bilingual outputs alongside `.zh.srt`.
+- Pass `--bilingual`, `--ass` (styled `.bilingual.ass` dual-color PotPlayer/VLC/mpv subtitles), and `--notes` (`.bilingual.md` clean reading transcript for Obsidian/Notion) alongside `--bilingual-order zh-first|source-first`.
 
-## Workflow 2: End-to-End Video → Source `.srt` → Chinese `.zh.srt`
+## Workflow 2: End-to-End Video, Audio, or URL → Source `.srt` → Translated `.srt`
 
 ```bash
-python scripts/run_single_video.py path/to/movie.mp4 --language ja --bilingual
+python scripts/run_single_video.py path/to/movie.mp4 --language ja --target zh --extract-subs --bilingual --ass --mux
+python scripts/run_single_video.py path/to/clip.mp4 --language ja --target en --bilingual --ass --burn
+python scripts/run_single_video.py path/to/podcast.mp3 --language en --bilingual --notes
+python scripts/run_single_video.py "https://www.youtube.com/watch?v=..." --language en --extract-subs --bilingual --notes
 ```
 
-Use `--language en` for English or `--language auto` when unknown. Add `--dry-run` to preview output paths without executing models.
+Supports local video files, audio/podcast files (`.mp3`, `.m4a`, `.wav`, `.flac`, `.ogg`, `.opus`, `.aac`, `.wma`), and media URLs via `yt-dlp` (`--extract-subs` grabs existing YouTube/Bilibili captions without downloading video when `--mux`/`--burn` are off). Pass `--mux` for soft-muxed `.subbed.mkv` or `--burn` for hard-burned `.burned.mp4` (mobile/social-ready). Use `--language ja|en|ko|fr|de|es|ru|pt|auto` and `--target zh|zh-Hant|en|ja|ko|fr|de|es|ru|pt`. Add `--dry-run` to preview output paths without executing models.
 
-## Workflow 3: Batch Process a Folder of Videos or `.srt` / `.vtt` Subtitles
+## Workflow 3: Batch Process a Folder of Videos, Audio, or `.srt` / `.vtt` Subtitles
 
 ```bash
 python scripts/run_batch.py path/to/series_folder --language ja --bilingual --continue-on-error
 ```
 
-Scans `.mp4`, `.mkv`, `.mov`, `.avi`, `.webm`, `.m4v`, `.ts`, and `.flv` files plus standalone `.srt` / `.vtt` subtitle files (use `--subtitles-only` to translate subtitles only, or `--recursive` for nested episodes), automatically reusing valid existing `.srt` / `.zh.srt` files and generating `.bilingual.srt` when requested.
+Scans video (`.mp4`, `.mkv`, `.mov`, `.avi`, `.webm`, `.m4v`, `.ts`, `.flv`) and audio (`.mp3`, `.m4a`, `.wav`, `.flac`, `.ogg`, `.opus`, `.aac`, `.wma`) files plus standalone `.srt` / `.vtt` subtitle files (use `--subtitles-only` to translate subtitles only, or `--recursive` for nested episodes), automatically reusing valid existing `.srt` / `.zh.srt` files and generating `.bilingual.srt` when requested.
 
 ## Workflow 4: Environment Check & Drag-and-Drop Web Studio
 

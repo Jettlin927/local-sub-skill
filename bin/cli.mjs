@@ -39,10 +39,14 @@ export function getInstallTargets(agent, homeDir = os.homedir()) {
     claude: path.join(homeDir, '.claude', 'skills', 'local-sub-skill'),
     codex: path.join(homeDir, '.codex', 'skills', 'local-sub-skill'),
     antigravity: path.join(homeDir, '.gemini', 'antigravity', 'skills', 'local-sub-skill'),
+    cursor: path.join(homeDir, '.cursor', 'skills', 'local-sub-skill'),
+    openclaw: path.join(homeDir, '.openclaw', 'skills', 'local-sub-skill'),
   };
   if (agent === 'all') return Object.entries(map);
   if (map[agent]) return [[agent, map[agent]]];
-  throw new Error(`Unsupported --agent "${agent}". Choose: claude, codex, antigravity, or all.`);
+  throw new Error(
+    `Unsupported --agent "${agent}". Choose: claude, codex, antigravity, cursor, openclaw, or all.`,
+  );
 }
 
 export function installSkill({ agent = 'all', homeDir = os.homedir() } = {}) {
@@ -68,29 +72,29 @@ function runPythonScript(scriptName, forwardArgs) {
 }
 
 function printHelp() {
-  console.log(`local-sub-skill v${PKG_JSON.version} — 100% Local Video → Chinese & Bilingual Subtitle CLI & AI Agent Skill
+  console.log(`local-sub-skill v${PKG_JSON.version} — 100% Local Video, Audio & URL → Chinese & Bilingual Subtitle CLI & AI Agent Skill
 
 Usage:
-  npx local-sub-skill install [--agent claude|codex|antigravity|all]
+  npx local-sub-skill install [--agent claude|codex|antigravity|cursor|openclaw|all]
       Install SKILL.md + scripts into your AI coding agent skills folder.
 
   npx local-sub-skill setup [--asr-model-dir <dir>] [--skip-whisper]
       Pull Ollama Hy-MT2-1.8B Q4_K_M and Faster-Whisper large-v3-turbo weights.
 
-  npx local-sub-skill translate <input.srt|input.vtt> [output.zh.srt] [--source ja|en|auto] [--bilingual] [--ass] [--bilingual-order zh-first|source-first] [--glossary <file>]
-      Translate an existing .srt or WebVTT (.vtt) subtitle file to Chinese (plus .bilingual.srt / styled .bilingual.ass) offline.
+  npx local-sub-skill translate <input.srt|vtt|ass|ssa> [output.srt] [--source ja|en|ko|fr|de|es|ru|pt|auto] [--target zh|zh-Hant|en|ja|ko|fr|de|es|ru|pt] [--model <ollama-model>] [--shift <sec>] [--bilingual] [--ass] [--notes] [--bilingual-order zh-first|source-first] [--glossary <file>]
+      Translate an existing .srt, WebVTT (.vtt), or ASS/SSA (.ass/.ssa) subtitle file offline (with optional timestamp shift + .bilingual.srt/.ass/.md).
 
-  npx local-sub-skill run <video.mp4> [--language ja|en|auto] [--bilingual] [--ass] [--bilingual-order zh-first|source-first] [--glossary <file>] [--dry-run]
-      End-to-end local Faster-Whisper transcription + Ollama Hy-MT2-1.8B translation.
+  npx local-sub-skill run <video|audio|url> [--language ja|en|ko|fr|de|es|ru|pt|auto] [--target zh|zh-Hant|en|ja|ko|fr|de|es|ru|pt] [--model <ollama-model>] [--shift <sec>] [--extract-subs] [--mux] [--burn] [--bilingual] [--ass] [--notes] [--glossary <file>] [--dry-run]
+      End-to-end local Faster-Whisper (for video/audio .mp3/.m4a/.wav, embedded ffmpeg track, or YouTube/Bilibili URL via yt-dlp) + Ollama translation, optional .subbed.mkv soft-mux or .burned.mp4 hardsub burn-in.
 
-  npx local-sub-skill batch <folder> [--recursive] [--subtitles-only] [--language ja|en|auto] [--bilingual] [--ass] [--glossary <file>] [--continue-on-error] [--dry-run]
-      Batch-generate .zh.srt (plus .bilingual.srt / .bilingual.ass) for every video and standalone .srt/.vtt file in a folder.
+  npx local-sub-skill batch <folder> [--recursive] [--subtitles-only] [--language ja|en|ko|fr|de|es|ru|pt|auto] [--target zh|zh-Hant|en|ja|ko|fr|de|es|ru|pt] [--model <ollama-model>] [--shift <sec>] [--extract-subs] [--mux] [--burn] [--bilingual] [--ass] [--notes] [--glossary <file>] [--continue-on-error] [--dry-run]
+      Batch-generate translated subtitles (plus .bilingual.srt, .bilingual.ass, .bilingual.md, optional .subbed.mkv / .burned.mp4) for every video, audio file, and standalone .srt/.vtt/.ass in a folder.
 
   npx local-sub-skill gui [--port 8765] [--no-browser]
       Launch the zero-dependency local Multi-File Drag-and-Drop Web Studio (127.0.0.1).
 
   npx local-sub-skill doctor [--json] [--strict]
-      Check Ollama, hy-mt2-local, Faster-Whisper, and GPU/CPU readiness across Windows/macOS/Linux.
+      Check Ollama, hy-mt2-local, Faster-Whisper, ffmpeg, yt-dlp, and GPU/CPU readiness across Windows/macOS/Linux.
 `);
 }
 

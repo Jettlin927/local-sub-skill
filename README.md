@@ -29,32 +29,36 @@ Translating a 2-hour Japanese/English lecture, documentary, or film with cloud L
 ### Option A: One-Line `npx` Install (Recommended / 最推荐)
 
 ```bash
-# Install the Skill into Claude Code, Codex & Antigravity in one command
+# Install the Skill into Claude Code, Codex, Antigravity, Cursor & OpenClaw in one command
 npx local-sub-skill install
+# (Or target a specific agent: --agent cursor | --agent openclaw)
 # (Or directly from GitHub before npm propagation:)
 npx github:Jettlin927/local-sub-skill install
 
 # Pull Ollama Hy-MT2-1.8B + Faster-Whisper large-v3-turbo weights
 npx local-sub-skill setup
 
-# Check Ollama, model weights & ASR readiness (Windows / macOS / Linux)
+# Check Ollama, model weights, ffmpeg, yt-dlp & ASR readiness (Windows / macOS / Linux)
 npx local-sub-skill doctor
 
 # Launch the zero-dependency local Drag-and-Drop Web Studio (http://127.0.0.1:8765)
 npx local-sub-skill gui
 
-# Translate an existing .srt or YouTube WebVTT (.vtt) file offline (auto-derives .zh.srt, .bilingual.srt & styled .bilingual.ass)
-npx local-sub-skill translate lecture.en.vtt --source en --target zh --bilingual --ass --glossary glossary.txt
+# Translate an existing .srt, YouTube WebVTT (.vtt), or anime ASS/SSA (.ass/.ssa) file offline (with optional --shift <sec> timestamp offset)
+npx local-sub-skill translate lecture.en.vtt --source en --target zh --shift 1.5 --bilingual --ass --notes --glossary glossary.txt
 
-# End-to-end local video -> Chinese .zh.srt + bilingual .bilingual.srt + styled .bilingual.ass
-npx local-sub-skill run /path/to/video.mp4 --language ja --bilingual --ass
+# End-to-end local video, podcast audio (.mp3/.m4a/.wav), or YouTube/Bilibili URL (via yt-dlp) + optional .subbed.mkv soft-mux or .burned.mp4 hardsub burn-in
+npx local-sub-skill run /path/to/video.mp4 --language ja --target zh --extract-subs --bilingual --ass --mux
+npx local-sub-skill run /path/to/clip.mp4 --language ja --target en --bilingual --ass --burn
+npx local-sub-skill run /path/to/podcast.mp3 --language en --bilingual --notes
+npx local-sub-skill run "https://www.youtube.com/watch?v=..." --language en --extract-subs --bilingual --notes
 
-# Batch-process an entire folder of videos or standalone .srt/.vtt subtitles
-npx local-sub-skill batch /path/to/videos --language ja --bilingual --ass --continue-on-error
+# Batch-process an entire folder of videos, audio files, or standalone .srt/.vtt/.ass/.ssa subtitles (supports custom --model <ollama-model> & --burn)
+npx local-sub-skill batch /path/to/videos --language ko --target zh-Hant --bilingual --ass --notes --continue-on-error
 ```
 
 ### Option B: Zero-Terminal Windows Drag-and-Drop Bundle & macOS/Linux Notes
-- **Windows Drag-and-Drop**: Run `npm run package:bundle` (or `python packaging/package_windows_bundle.py`) to build `dist/local-sub-desktop-win64-v1.4.0.zip` containing `DropVideoOrSrtHere.bat` (drag any `.mp4`/`.mkv`/`.srt`/`.vtt`/folder onto the icon to generate `.zh.srt`, `.bilingual.srt`, and styled `.bilingual.ass`) and `LaunchGUI.bat`.
+- **Windows Drag-and-Drop**: Run `npm run package:bundle` (or `python packaging/package_windows_bundle.py`) to build `dist/local-sub-desktop-win64-v1.8.0.zip` containing `DropVideoOrSrtHere.bat` (drag any video, `.mp3`/`.m4a`/`.wav` audio, `.srt`/`.vtt`/`.ass`/`.ssa`, or folder onto the icon to generate `.zh.srt`, `.bilingual.srt`, `.bilingual.ass`, and `.bilingual.md`, plus auto-extract embedded tracks via `ffmpeg` when available) and `LaunchGUI.bat` (with installed Ollama model picker, subtitle timestamp offset, & `.burned.mp4` hardsub burn-in toggle).
 - **macOS / Linux**: If `faster-whisper-xxl` is not installed, `run` and `batch` automatically fall back to Python `faster-whisper` (`pip install faster-whisper`) and default to CPU `int8` on macOS Apple Silicon / non-CUDA machines.
 
 ### Option C: Direct Python Usage

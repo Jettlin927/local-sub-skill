@@ -12,17 +12,20 @@ import time
 
 from local_translation import (
     BILINGUAL_ORDERS,
+    SOURCE_LANGUAGE_CHOICES,
+    TARGET_LANGUAGE_CHOICES,
     default_ass_path,
     default_bilingual_path,
+    default_notes_path,
     derive_target_srt_path,
+    materialize_bilingual_outputs,
     parse_subtitles,
     strip_subtitle_lang_suffix,
     translate_srt,
     validate_pair,
-    write_bilingual_ass,
-    write_bilingual_srt,
 )
 from run_single_video import (
+    AUDIO_EXTENSIONS,
     DEFAULT_ASR_MODEL,
     DEFAULT_COMPUTE_TYPE,
     DEFAULT_DEVICE,
@@ -34,8 +37,9 @@ from run_single_video import (
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".ts", ".flv"}
-SUBTITLE_EXTENSIONS = {".srt", ".vtt"}
-GENERATED_SUBTITLE_SUFFIXES = (".zh.srt", ".bilingual.srt", ".zh-hant.srt")
+MEDIA_EXTENSIONS = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
+SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass", ".ssa"}
+GENERATED_SUBTITLE_SUFFIXES = (".zh.srt", ".bilingual.srt", ".zh-hant.srt", ".bilingual.ass")
 
 
 def _discover_by_ext(folder: Path, extensions: set[str], recursive: bool = False) -> list[Path]:
@@ -54,8 +58,11 @@ def _discover_by_ext(folder: Path, extensions: set[str], recursive: bool = False
 
 
 def discover_videos(folder: Path, recursive: bool = False) -> list[Path]:
-    """Return sorted video files inside folder, skipping hidden/.local_subtitles dirs."""
-    return _discover_by_ext(folder, VIDEO_EXTENSIONS, recursive=recursive)
+    """Return sorted video & audio files inside folder, skipping hidden/.local_subtitles dirs."""
+    return _discover_by_ext(folder, MEDIA_EXTENSIONS, recursive=recursive)
+
+
+discover_media = discover_videos
 
 
 def discover_standalone_subtitles(
@@ -92,9 +99,9 @@ def build_batch_parser() -> argparse.ArgumentParser:
     parser.add_argument("--compute-type", default=DEFAULT_COMPUTE_TYPE)
     parser.add_argument("--asr-batch-size", type=int, default=4)
     parser.add_argument("--sequential-asr", action="store_true")
-    parser.add_argument("--language", choices=("ja", "en", "auto"), default="ja")
-    parser.add_argument("--source", choices=("ja", "en", "auto"))
-    parser.add_argument("--target", default="zh")
+    parser.add_argument("--language", choices=SOURCE_LANGUAGE_CHOICES, default="ja")
+    parser.add_argument("--source", choices=SOURCE_LANGUAGE_CHOICES)
+    parser.add_argument("--target", choices=TARGET_LANGUAGE_CHOICES, default="zh", help="Target subtitle code (zh, zh-Hant, en, ja, ko, ...).")
     parser.add_argument("--model", default="hy-mt2-local")
     parser.add_argument("--host", default="http://localhost:11434")
     parser.add_argument("--batch-size", type=int, default=8)
@@ -112,14 +119,19 @@ def build_batch_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bilingual", action="store_true", help="Also write a .bilingual.srt per video.")
     parser.add_argument("--bilingual-order", choices=BILINGUAL_ORDERS, default="zh-first")
     parser.add_argument("--ass", action="store_true", help="Also write a styled dual-language .bilingual.ass per item.")
+    parser.add_argument("--notes", action="store_true", help="Also write bilingual Markdown reading notes (.bilingual.md).")
+    parser.add_argument("--extract-subs", action="store_true", help="Try extracting embedded text subtitles via ffmpeg before Whisper ASR.")
+    parser.add_argument("--mux", action="store_true", help="Soft-mux generated subtitles into <video>.subbed.mkv via ffmpeg.")
+    parser.add_argument("--burn", action="store_true", help="Hard-burn generated subtitles into <video>.burned.mp4 via ffmpeg.")
     parser.add_argument("--glossary", type=Path, help="Optional JSON or text glossary (`source=target`) file.")
-    parser.add_argument("--subtitles-only", action="store_true", help="Only batch-translate standalone .srt/.vtt files.")
+    parser.add_argument("--shift", dest="shift_seconds", type=float, default=0.0, help="Shift subtitle timestamps by seconds (e.g. 1.5 or -0.8).")
+    parser.add_argument("--subtitles-only", action="store_true", help="Only batch-translate standalone .srt/.vtt/.ass/.ssa files.")
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
 
 def run_subtitle_job(subtitle_arg: str | Path, args: argparse.Namespace) -> dict:
-    """Translate a standalone .srt or .vtt subtitle file with batch/checkpoint guardrails."""
+    """Translate a standalone .srt, .vtt, or .ass/.ssa subtitle file with batch/checkpoint guardrails."""
     workspace = args.workspace.resolve()
     source_sub = Path(subtitle_arg)
     source_sub = (source_sub if source_sub.is_absolute() else workspace / source_sub).resolve()
@@ -130,7 +142,9 @@ def run_subtitle_job(subtitle_arg: str | Path, args: argparse.Namespace) -> dict
     target_srt = output_dir / derive_target_srt_path(source_sub, target=args.target).name
     bilingual_srt = default_bilingual_path(target_srt) if (args.bilingual and not args.skip_translate) else None
     bilingual_ass = default_ass_path(target_srt) if (getattr(args, "ass", False) and not args.skip_translate) else None
+    bilingual_md = default_notes_path(target_srt) if (getattr(args, "notes", False) and not args.skip_translate) else None
     glossary_arg = getattr(args, "glossary", None)
+    shift_val = float(getattr(args, "shift_seconds", 0.0) or 0.0)
 
     if args.dry_run:
         return {
@@ -139,8 +153,10 @@ def run_subtitle_job(subtitle_arg: str | Path, args: argparse.Namespace) -> dict
             "target_srt": str(target_srt),
             "bilingual_srt": str(bilingual_srt) if bilingual_srt else None,
             "bilingual_ass": str(bilingual_ass) if bilingual_ass else None,
-            "bilingual_order": args.bilingual_order if (bilingual_srt or bilingual_ass) else None,
+            "bilingual_md": str(bilingual_md) if bilingual_md else None,
+            "bilingual_order": args.bilingual_order if (bilingual_srt or bilingual_ass or bilingual_md) else None,
             "glossary": str(glossary_arg) if glossary_arg else None,
+            "shift_seconds": shift_val,
             "translation_model": args.model,
             "cloud": False,
             "dry_run": True,
@@ -155,7 +171,7 @@ def run_subtitle_job(subtitle_arg: str | Path, args: argparse.Namespace) -> dict
 
     translation = None
     if not args.skip_translate and target_srt.exists() and not (args.force or args.force_translate):
-        existing_problems = validate_pair(source_sub, target_srt, args.max_kana_ratio)
+        existing_problems = validate_pair(source_sub, target_srt, args.max_kana_ratio, check_cjk=args.target.startswith("zh"), shift_seconds=shift_val)
         if existing_problems:
             raise RuntimeError(
                 "Existing target subtitle is invalid; rerun with --force-translate: "
@@ -167,14 +183,17 @@ def run_subtitle_job(subtitle_arg: str | Path, args: argparse.Namespace) -> dict
             "cue_count": len(parse_subtitles(target_srt)),
             "request_count": 0,
         }
-        if bilingual_srt is not None and (not bilingual_srt.exists() or args.force or args.force_translate):
-            write_bilingual_srt(source_sub, target_srt, bilingual_srt, order=args.bilingual_order)
-        if bilingual_srt is not None:
-            translation["bilingual_srt"] = str(bilingual_srt)
-        if bilingual_ass is not None and (not bilingual_ass.exists() or args.force or args.force_translate):
-            write_bilingual_ass(source_sub, target_srt, bilingual_ass, order=args.bilingual_order)
-        if bilingual_ass is not None:
-            translation["bilingual_ass"] = str(bilingual_ass)
+        translation.update(
+            materialize_bilingual_outputs(
+                source_sub,
+                target_srt,
+                bilingual_path=bilingual_srt,
+                ass_path=bilingual_ass,
+                notes_path=bilingual_md,
+                order=args.bilingual_order,
+                force=bool(args.force or args.force_translate),
+            )
+        )
     elif not args.skip_translate:
         checkpoint = log_dir / "translation.checkpoint.json"
         cache = workspace / ".local_subtitles" / "logs" / "translation_cache.json"
@@ -199,16 +218,19 @@ def run_subtitle_job(subtitle_arg: str | Path, args: argparse.Namespace) -> dict
             bilingual_path=bilingual_srt,
             bilingual_order=args.bilingual_order,
             ass_path=bilingual_ass,
+            notes_path=bilingual_md,
             glossary=glossary_arg,
+            shift_seconds=shift_val,
         )
 
-    problems = [] if args.skip_translate else validate_pair(source_sub, target_srt, args.max_kana_ratio)
+    problems = [] if args.skip_translate else validate_pair(source_sub, target_srt, args.max_kana_ratio, check_cjk=args.target.startswith("zh"), shift_seconds=shift_val)
     return {
         "subtitle": str(source_sub),
         "source_srt": str(source_sub),
         "target_srt": str(target_srt),
         "bilingual_srt": str(bilingual_srt) if bilingual_srt else None,
         "bilingual_ass": str(bilingual_ass) if bilingual_ass else None,
+        "bilingual_md": str(bilingual_md) if bilingual_md else None,
         "ok": not problems,
         "problems": problems,
         "cloud": False,

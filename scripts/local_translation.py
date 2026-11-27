@@ -20,7 +20,21 @@ import urllib.request
 
 
 PROMPT_VERSION = "hy-mt2-subtitles-v1"
-LANGUAGES = {"ja": "日语", "en": "英语", "zh": "简体中文", "zh-Hant": "繁体中文", "auto": "原语言"}
+SOURCE_LANGUAGE_CHOICES = ("ja", "en", "ko", "fr", "de", "es", "ru", "pt", "auto")
+TARGET_LANGUAGE_CHOICES = ("zh", "zh-Hant", "en", "ja", "ko", "fr", "de", "es", "ru", "pt")
+LANGUAGES = {
+    "ja": "日语",
+    "en": "英语",
+    "ko": "韩语",
+    "fr": "法语",
+    "de": "德语",
+    "es": "西班牙语",
+    "ru": "俄语",
+    "pt": "葡萄牙语",
+    "zh": "简体中文",
+    "zh-Hant": "繁体中文",
+    "auto": "原语言",
+}
 BILINGUAL_ORDERS = ("zh-first", "source-first")
 DEFAULT_GLOSSARY_NAMES = (
     ".local-sub-glossary.json",
@@ -40,6 +54,10 @@ VTT_TIMING_RE = re.compile(
     r"^(?P<start>(?:\d{2,}:)?\d{2}:\d{2}[.,]\d{3})\s+-->\s+(?P<end>(?:\d{2,}:)?\d{2}:\d{2}[.,]\d{3})(?:\s+.*)?$"
 )
 VTT_TAG_RE = re.compile(r"<[^>]+>")
+ASS_TIME_RE = re.compile(r"^(\d+):(\d{2}):(\d{2})[.:](\d{2,3})$")
+ASS_TAG_RE = re.compile(r"\{[^}]*\}")
+ASS_DRAWING_RE = re.compile(r"\{[^}]*\\p[1-9]\b[^}]*\}")
+SRT_MS_RE = re.compile(r"^(\d{2,}):(\d{2}):(\d{2})[,.](\d{3})$")
 NUMBER_RE = re.compile(r"^\[(\d+)\]\s*(.*)$")
 
 
@@ -117,14 +135,118 @@ def parse_vtt_text(text: str, source_name: str = "<vtt>") -> list[Cue]:
     return cues
 
 
+def _normalize_ass_timestamp(timestamp: str) -> str:
+    match = ASS_TIME_RE.fullmatch(timestamp.strip())
+    if not match:
+        raise ValueError(f"Malformed ASS timestamp: {timestamp}")
+    hours, minutes, seconds, frac = match.groups()
+    ms = int(frac) * 10 if len(frac) == 2 else int(frac)
+    return f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d},{ms:03d}"
+
+
+def strip_ass_tags(text: str) -> str:
+    """Strip ASS/SSA override blocks (`{\\...}`) and normalize line breaks."""
+    if ASS_DRAWING_RE.search(text):
+        return ""
+    cleaned = ASS_TAG_RE.sub("", text)
+    cleaned = cleaned.replace(r"\N", "\n").replace(r"\n", "\n").replace(r"\h", " ")
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    return "\n".join(lines).strip()
+
+
+def parse_ass_text(text: str, source_name: str = "<ass>") -> list[Cue]:
+    """Parse ASS/SSA subtitle text into normalized SRT Cue objects."""
+    stripped = text.lstrip("\ufeff")
+    if not stripped.strip():
+        raise ValueError(f"No usable cues found in ASS/SSA {source_name}")
+    in_events = "[Events]" not in stripped
+    start_idx, end_idx, text_idx, num_fields = 1, 2, 9, 10
+    cues: list[Cue] = []
+    for raw_line in stripped.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(";"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            in_events = line.lower() == "[events]"
+            continue
+        if not in_events:
+            continue
+        if line.lower().startswith("format:"):
+            fields = [part.strip().lower() for part in line.split(":", 1)[1].split(",")]
+            if "start" in fields and "end" in fields and "text" in fields:
+                start_idx = fields.index("start")
+                end_idx = fields.index("end")
+                text_idx = fields.index("text")
+                num_fields = len(fields)
+            continue
+        if not line.lower().startswith("dialogue:"):
+            continue
+        payload = line.split(":", 1)[1].lstrip()
+        parts = payload.split(",", num_fields - 1)
+        if len(parts) <= max(start_idx, end_idx, text_idx):
+            continue
+        body = strip_ass_tags(parts[text_idx])
+        if not body:
+            continue
+        timing = f"{_normalize_ass_timestamp(parts[start_idx])} --> {_normalize_ass_timestamp(parts[end_idx])}"
+        cues.append(Cue(str(len(cues) + 1), timing, body))
+    if not cues:
+        raise ValueError(f"No usable cues found in ASS/SSA {source_name}")
+    return cues
+
+
+def _parse_srt_ms(timestamp: str) -> int:
+    match = SRT_MS_RE.fullmatch(timestamp.strip())
+    if not match:
+        raise ValueError(f"Malformed SRT timestamp: {timestamp}")
+    h, m, s, ms = (int(group) for group in match.groups())
+    return ((h * 60 + m) * 60 + s) * 1000 + ms
+
+
+def _format_srt_ms(total_ms: int) -> str:
+    clamped = max(0, int(total_ms))
+    hours, rem = divmod(clamped, 3_600_000)
+    minutes, rem = divmod(rem, 60_000)
+    seconds, ms = divmod(rem, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{ms:03d}"
+
+
+def shift_timing(timing: str, offset_ms: int) -> str:
+    """Shift an SRT `start --> end` timing string by offset_ms, clamping at 0ms."""
+    parts = [part.strip() for part in timing.split("-->", 1)]
+    if len(parts) != 2:
+        raise ValueError(f"Malformed SRT timing: {timing}")
+    start_ms = _parse_srt_ms(parts[0])
+    end_part = parts[1].split(None, 1)[0]
+    end_ms = _parse_srt_ms(end_part)
+    new_start = max(0, start_ms + offset_ms)
+    min_end = new_start + (1 if end_ms > start_ms else 0)
+    new_end = max(min_end, end_ms + offset_ms)
+    return f"{_format_srt_ms(new_start)} --> {_format_srt_ms(new_end)}"
+
+
+def shift_cues(cues: list[Cue], offset_seconds: float) -> list[Cue]:
+    """Return cues with timestamps shifted by offset_seconds (positive=later, negative=earlier)."""
+    offset_ms = round(float(offset_seconds) * 1000)
+    if offset_ms == 0:
+        return cues
+    return [Cue(cue.index, shift_timing(cue.timing, offset_ms), cue.text) for cue in cues]
+
+
 def parse_subtitles(path: Path | str) -> list[Cue]:
-    """Parse either an SRT or WebVTT subtitle file into Cue objects."""
+    """Parse an SRT, WebVTT (.vtt), or ASS/SSA (.ass/.ssa) subtitle file into Cue objects."""
     resolved = Path(path)
-    if resolved.suffix.lower() == ".vtt":
+    suffix = resolved.suffix.lower()
+    if suffix == ".vtt":
         return parse_vtt_text(resolved.read_text(encoding="utf-8-sig"), str(resolved))
+    if suffix in {".ass", ".ssa"}:
+        return parse_ass_text(resolved.read_text(encoding="utf-8-sig"), str(resolved))
     raw = resolved.read_text(encoding="utf-8-sig")
-    if raw.lstrip().startswith("WEBVTT"):
+    leading = raw.lstrip()
+    if leading.startswith("WEBVTT"):
         return parse_vtt_text(raw, str(resolved))
+    if leading.startswith(("[Script Info]", "[Events]")):
+        return parse_ass_text(raw, str(resolved))
     return parse_srt(resolved)
 
 
@@ -144,8 +266,9 @@ def write_srt(path: Path | str, cues: list[Cue]) -> None:
 
 
 def strip_subtitle_lang_suffix(stem: str) -> str:
-    for suffix in (".zh-Hant", ".zh", ".en", ".ja", ".source"):
-        if stem.endswith(suffix):
+    lower_stem = stem.lower()
+    for suffix in (".zh-hant", ".zh", ".en", ".ja", ".ko", ".fr", ".de", ".es", ".ru", ".pt", ".source"):
+        if lower_stem.endswith(suffix):
             return stem[: -len(suffix)]
     return stem
 
@@ -169,6 +292,13 @@ def default_ass_path(target_path: Path | str) -> Path:
     path = Path(target_path)
     stem = strip_subtitle_lang_suffix(path.stem)
     return path.with_name(f"{stem}.bilingual.ass")
+
+
+def default_notes_path(target_path: Path | str) -> Path:
+    """Derive a `.bilingual.md` reading-notes sibling path from a translated SRT path."""
+    path = Path(target_path)
+    stem = strip_subtitle_lang_suffix(path.stem)
+    return path.with_name(f"{stem}.bilingual.md")
 
 
 def parse_glossary_text(text: str) -> dict[str, str]:
@@ -341,7 +471,81 @@ def write_bilingual_ass(
     return resolved_out
 
 
-def validate_pair(source_path: Path | str, target_path: Path | str, max_kana_ratio: float = 0.03) -> list[str]:
+def render_bilingual_markdown(
+    source_cues: list[Cue],
+    target_cues: list[Cue],
+    order: str = "zh-first",
+    title: str = "Bilingual Transcript",
+) -> str:
+    """Render timestamp-indexed bilingual Markdown reading notes from aligned cues."""
+    if order not in BILINGUAL_ORDERS:
+        raise ValueError(f"Unsupported bilingual order: {order}. Choose one of {BILINGUAL_ORDERS}.")
+    lines = [f"# {title}", ""]
+    for target_cue, src_text, tgt_text in _aligned_pairs(source_cues, target_cues):
+        start_ts = target_cue.timing.split("-->", 1)[0].strip().split(",", 1)[0]
+        src_flat = " ".join(part.strip() for part in src_text.splitlines() if part.strip())
+        tgt_flat = " ".join(part.strip() for part in tgt_text.splitlines() if part.strip())
+        if src_flat == tgt_flat or not src_flat:
+            lines.append(f"- `{start_ts}` **{tgt_flat}**")
+        elif order == "zh-first":
+            lines.append(f"- `{start_ts}` **{tgt_flat}**  \n  {src_flat}")
+        else:
+            lines.append(f"- `{start_ts}` {src_flat}  \n  **{tgt_flat}**")
+    return "\n".join(lines) + "\n"
+
+
+def write_bilingual_markdown(
+    source_path: Path | str,
+    target_path: Path | str,
+    notes_path: Path | str | None = None,
+    order: str = "zh-first",
+) -> Path:
+    """Write bilingual `.bilingual.md` reading notes from aligned source and translated subtitles."""
+    resolved_out = Path(notes_path) if notes_path else default_notes_path(target_path)
+    md_text = render_bilingual_markdown(
+        parse_subtitles(source_path),
+        parse_subtitles(target_path),
+        order=order,
+        title=strip_subtitle_lang_suffix(resolved_out.stem),
+    )
+    _atomic_text(resolved_out, md_text)
+    return resolved_out
+
+
+def materialize_bilingual_outputs(
+    source_path: Path | str,
+    target_path: Path | str,
+    *,
+    bilingual_path: Path | None = None,
+    ass_path: Path | None = None,
+    notes_path: Path | None = None,
+    order: str = "zh-first",
+    force: bool = False,
+) -> dict[str, str]:
+    """Ensure requested .bilingual.srt, .bilingual.ass, and .bilingual.md exist for a target SRT."""
+    outputs: dict[str, str] = {}
+    writers = (
+        ("bilingual_srt", bilingual_path, write_bilingual_srt),
+        ("bilingual_ass", ass_path, write_bilingual_ass),
+        ("bilingual_md", notes_path, write_bilingual_markdown),
+    )
+    for key, out_path, writer in writers:
+        if out_path is None:
+            continue
+        if not out_path.exists() or force:
+            writer(source_path, target_path, out_path, order=order)
+        outputs[key] = str(out_path)
+    return outputs
+
+
+def validate_pair(
+    source_path: Path | str,
+    target_path: Path | str,
+    max_kana_ratio: float = 0.03,
+    *,
+    check_cjk: bool = True,
+    shift_seconds: float = 0.0,
+) -> list[str]:
     for label, path in (("source", source_path), ("target", target_path)):
         if not Path(path).is_file():
             return [f"missing {label} subtitle: {path}"]
@@ -349,10 +553,18 @@ def validate_pair(source_path: Path | str, target_path: Path | str, max_kana_rat
         source, target = parse_subtitles(source_path), parse_subtitles(target_path)
     except ValueError as error:
         return [str(error)]
-    return _validate_cues(source, target, max_kana_ratio)
+    if shift_seconds:
+        source = shift_cues(source, shift_seconds)
+    return _validate_cues(source, target, max_kana_ratio, check_cjk=check_cjk)
 
 
-def _validate_cues(source: list[Cue], target: list[Cue], max_kana_ratio: float) -> list[str]:
+def _validate_cues(
+    source: list[Cue],
+    target: list[Cue],
+    max_kana_ratio: float,
+    *,
+    check_cjk: bool = True,
+) -> list[str]:
     if len(source) != len(target):
         return [f"cue count mismatch: source={len(source)}, target={len(target)}"]
     problems = []
@@ -363,12 +575,13 @@ def _validate_cues(source: list[Cue], target: list[Cue], max_kana_ratio: float) 
             problems.append(f"timing mismatch at cue {number}")
         if not translated.text.strip():
             problems.append(f"empty text at cue {number}")
-    text = "\n".join(cue.text for cue in target)
-    han_count = len(HAN_RE.findall(text))
-    if not han_count:
-        problems.append("no CJK Han text")
-    elif len(KANA_RE.findall(text)) / han_count > max_kana_ratio:
-        problems.append("high kana residue")
+    if check_cjk:
+        text = "\n".join(cue.text for cue in target)
+        han_count = len(HAN_RE.findall(text))
+        if not han_count:
+            problems.append("no CJK Han text")
+        elif len(KANA_RE.findall(text)) / han_count > max_kana_ratio:
+            problems.append("high kana residue")
     return problems
 
 
@@ -501,7 +714,7 @@ def _resolve_glossary(glossary: dict[str, str] | Path | str | None, source_path:
     return {str(k).strip(): str(v).strip() for k, v in glossary.items() if str(k).strip() and str(v).strip()}
 
 
-def translate_srt(source_path: Path | str, target_path: Path | str, *, model: str = "hy-mt2-local", source: str = "ja", target: str = "zh", batch_size: int = 8, host: str = "http://localhost:11434", cache_path: Path | str | None = None, checkpoint_path: Path | str | None = None, retries: int = 2, num_ctx: int = 4096, keep_alive: str = "10m", bilingual_path: Path | str | None = None, bilingual_order: str = "zh-first", ass_path: Path | str | None = None, glossary: dict[str, str] | Path | str | None = None) -> dict:
+def translate_srt(source_path: Path | str, target_path: Path | str, *, model: str = "hy-mt2-local", source: str = "ja", target: str = "zh", batch_size: int = 8, host: str = "http://localhost:11434", cache_path: Path | str | None = None, checkpoint_path: Path | str | None = None, retries: int = 2, num_ctx: int = 4096, keep_alive: str = "10m", bilingual_path: Path | str | None = None, bilingual_order: str = "zh-first", ass_path: Path | str | None = None, notes_path: Path | str | None = None, glossary: dict[str, str] | Path | str | None = None, shift_seconds: float = 0.0) -> dict:
     started = time.monotonic()
     if bilingual_order not in BILINGUAL_ORDERS:
         raise ValueError(f"Unsupported bilingual order: {bilingual_order}. Choose one of {BILINGUAL_ORDERS}.")
@@ -513,7 +726,7 @@ def translate_srt(source_path: Path | str, target_path: Path | str, *, model: st
     if batch_size < 1 or retries < 0 or num_ctx < 1024:
         raise ValueError("batch_size must be positive, retries nonnegative and num_ctx >= 1024")
     resolved_glossary = _resolve_glossary(glossary, source_path)
-    cues = parse_subtitles(source_path)
+    cues = shift_cues(parse_subtitles(source_path), shift_seconds)
     cache_path = Path(cache_path) if cache_path else source_path.parent / ".local_translation_cache.json"
     checkpoint_path = Path(checkpoint_path) if checkpoint_path else target_path.with_name(target_path.name + ".checkpoint.json")
     names = {model, model if ":" in model else model + ":latest"}
@@ -523,6 +736,8 @@ def translate_srt(source_path: Path | str, target_path: Path | str, *, model: st
     identity = {"model": model, "digest": entry["digest"], "source": source, "target": target, "version": PROMPT_VERSION, "num_ctx": num_ctx, "batch_size": batch_size}
     if resolved_glossary:
         identity["glossary"] = sorted(resolved_glossary.items())
+    if shift_seconds:
+        identity["shift_seconds"] = round(float(shift_seconds), 3)
     fingerprint = _hash({"identity": identity, "cues": [vars(cue) for cue in cues]})
     checkpoint = _read_json(checkpoint_path)
     completed = checkpoint.get("completed", {}) if checkpoint.get("fingerprint") == fingerprint else {}
@@ -630,7 +845,7 @@ def translate_srt(source_path: Path | str, target_path: Path | str, *, model: st
             translate_indexes(pending)
         print(f"translated {len(completed)}/{len(cues)} cues", flush=True)
     translated = [Cue(cue.index, cue.timing, completed[str(i)]) for i, cue in enumerate(cues)]
-    problems = _validate_cues(cues, translated, 0.03) if target.startswith("zh") else []
+    problems = _validate_cues(cues, translated, 0.03, check_cjk=target.startswith("zh"))
     if problems:
         raise RuntimeError("translation validation failed: " + "; ".join(problems))
     write_srt(target_path, translated)
@@ -645,8 +860,22 @@ def translate_srt(source_path: Path | str, target_path: Path | str, *, model: st
             render_bilingual_ass(cues, translated, order=bilingual_order, title=resolved_ass.stem),
         )
         stats["bilingual_ass"] = str(resolved_ass)
+    if notes_path is not None:
+        resolved_notes = Path(notes_path)
+        _atomic_text(
+            resolved_notes,
+            render_bilingual_markdown(
+                cues,
+                translated,
+                order=bilingual_order,
+                title=strip_subtitle_lang_suffix(resolved_notes.stem),
+            ),
+        )
+        stats["bilingual_md"] = str(resolved_notes)
     if resolved_glossary:
         stats["glossary_count"] = len(resolved_glossary)
+    if shift_seconds:
+        stats["shift_seconds"] = round(float(shift_seconds), 3)
     stats["elapsed"] = time.monotonic() - started
     stats["cache_path"], stats["checkpoint_path"] = str(cache_path), str(checkpoint_path)
     return stats
@@ -654,11 +883,11 @@ def translate_srt(source_path: Path | str, target_path: Path | str, *, model: st
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source_srt", type=Path, help="Input .srt or .vtt subtitle file.")
+    parser.add_argument("source_srt", type=Path, help="Input .srt, .vtt, or .ass/.ssa subtitle file.")
     parser.add_argument("target_srt", nargs="?", type=Path, help="Optional output .zh.srt path (auto-derived if omitted).")
     parser.add_argument("--model", default="hy-mt2-local")
-    parser.add_argument("--source", default="ja")
-    parser.add_argument("--target", default="zh")
+    parser.add_argument("--source", choices=SOURCE_LANGUAGE_CHOICES, default="ja")
+    parser.add_argument("--target", choices=TARGET_LANGUAGE_CHOICES, default="zh")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--host", default="http://localhost:11434")
     parser.add_argument("--cache-path", type=Path)
@@ -671,7 +900,10 @@ def main() -> int:
     parser.add_argument("--bilingual-order", choices=BILINGUAL_ORDERS, default="zh-first")
     parser.add_argument("--ass", action="store_true", help="Also emit a styled dual-language .bilingual.ass subtitle.")
     parser.add_argument("--ass-path", type=Path, help="Explicit output path for styled bilingual ASS.")
+    parser.add_argument("--notes", action="store_true", help="Also emit bilingual Markdown reading notes (.bilingual.md).")
+    parser.add_argument("--notes-path", type=Path, help="Explicit output path for bilingual Markdown notes.")
     parser.add_argument("--glossary", type=Path, help="Optional JSON or `source=target` text glossary file.")
+    parser.add_argument("--shift", dest="shift_seconds", type=float, default=0.0, help="Shift all subtitle timestamps by seconds (e.g. 1.5 or -0.8).")
     args = parser.parse_args()
     options = vars(args).copy()
     source_path = options.pop("source_srt")
@@ -688,6 +920,12 @@ def main() -> int:
         options["ass_path"] = explicit_ass
     elif emit_ass:
         options["ass_path"] = default_ass_path(target_path)
+    emit_notes = options.pop("notes")
+    explicit_notes = options.pop("notes_path")
+    if explicit_notes is not None:
+        options["notes_path"] = explicit_notes
+    elif emit_notes:
+        options["notes_path"] = default_notes_path(target_path)
     print(json.dumps(translate_srt(source_path, target_path, **options), ensure_ascii=False, indent=2))
     return 0
 

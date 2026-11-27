@@ -1,7 +1,7 @@
 {
   "name": "local-sub-skill",
-  "version": "1.4.0",
-  "description": "100% local video/WebVTT/SRT-to-Chinese, bilingual SRT & styled ASS subtitle CLI, Drag-and-Drop Web Studio & AI Agent Skill powered by Faster-Whisper + Ollama Hy-MT2-1.8B",
+  "version": "1.8.0",
+  "description": "100% local video/audio/URL/WebVTT/ASS/SRT subtitle translator (Chinese, English, Japanese, Korean & more), timestamp shift, bilingual SRT/ASS/MD, hardsub burn-in MP4, Drag-and-Drop Web Studio & AI Agent Skill powered by Faster-Whisper + Ollama Hy-MT2-1.8B",
   "type": "module",
   "license": "MIT",
   "author": "Jett Lin <jettlin666@gmail.com>",

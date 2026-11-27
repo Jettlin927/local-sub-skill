@@ -27,18 +27,24 @@ if "%~1"=="" (
 set "TARGET=%~1"
 if exist "%TARGET%\" (
   echo [Batch Folder] %TARGET%
-  "%PY%" "%ROOT%scripts\run_batch.py" "%TARGET%" --language auto --bilingual --ass --continue-on-error
+  "%PY%" "%ROOT%scripts\run_batch.py" "%TARGET%" --language auto --extract-subs --bilingual --ass --notes --continue-on-error
 ) else if /i "%~x1"==".srt" (
   echo [Translate Subtitle] %TARGET%
-  "%PY%" "%ROOT%scripts\local_translation.py" "%TARGET%" --source auto --target zh --bilingual --ass
+  "%PY%" "%ROOT%scripts\local_translation.py" "%TARGET%" --source auto --target zh --bilingual --ass --notes
 ) else if /i "%~x1"==".vtt" (
   echo [Translate WebVTT] %TARGET%
-  "%PY%" "%ROOT%scripts\local_translation.py" "%TARGET%" --source auto --target zh --bilingual --ass
+  "%PY%" "%ROOT%scripts\local_translation.py" "%TARGET%" --source auto --target zh --bilingual --ass --notes
+) else if /i "%~x1"==".ass" (
+  echo [Translate ASS Subtitle] %TARGET%
+  "%PY%" "%ROOT%scripts\local_translation.py" "%TARGET%" --source auto --target zh --bilingual --ass --notes
+) else if /i "%~x1"==".ssa" (
+  echo [Translate SSA Subtitle] %TARGET%
+  "%PY%" "%ROOT%scripts\local_translation.py" "%TARGET%" --source auto --target zh --bilingual --ass --notes
 ) else (
-  echo [Video -> Chinese + Bilingual SRT/ASS] %TARGET%
-  "%PY%" "%ROOT%scripts\run_single_video.py" "%TARGET%" --language auto --bilingual --ass
+  echo [Media ^(Video/Audio^) -^> Chinese + Bilingual SRT/ASS/MD] %TARGET%
+  "%PY%" "%ROOT%scripts\run_single_video.py" "%TARGET%" --language auto --extract-subs --bilingual --ass --notes
 )
 
 echo.
-echo Done. Check the output .zh.srt / .bilingual.srt / .bilingual.ass next to your input file.
+echo Done. Check the output .zh.srt / .bilingual.srt / .bilingual.ass / .bilingual.md next to your input file.
 pause
