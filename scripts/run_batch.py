@@ -191,7 +191,7 @@ def run_subtitle_job(subtitle_arg: str | Path, args: argparse.Namespace) -> dict
                 ass_path=bilingual_ass,
                 notes_path=bilingual_md,
                 order=args.bilingual_order,
-                force=bool(args.force or args.force_translate),
+                shift_seconds=shift_val,
             )
         )
     elif not args.skip_translate:

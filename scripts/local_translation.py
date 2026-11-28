@@ -512,6 +512,36 @@ def write_bilingual_markdown(
     return resolved_out
 
 
+def _write_bilingual_outputs(
+    source_cues: list[Cue],
+    target_cues: list[Cue],
+    *,
+    bilingual_path: Path | None,
+    ass_path: Path | None,
+    notes_path: Path | None,
+    order: str,
+) -> dict[str, str]:
+    outputs: dict[str, str] = {}
+    if bilingual_path is not None:
+        write_srt(bilingual_path, build_bilingual_cues(source_cues, target_cues, order=order))
+        outputs["bilingual_srt"] = str(bilingual_path)
+    if ass_path is not None:
+        _atomic_text(
+            ass_path,
+            render_bilingual_ass(source_cues, target_cues, order=order, title=ass_path.stem),
+        )
+        outputs["bilingual_ass"] = str(ass_path)
+    if notes_path is not None:
+        _atomic_text(
+            notes_path,
+            render_bilingual_markdown(
+                source_cues, target_cues, order=order, title=strip_subtitle_lang_suffix(notes_path.stem)
+            ),
+        )
+        outputs["bilingual_md"] = str(notes_path)
+    return outputs
+
+
 def materialize_bilingual_outputs(
     source_path: Path | str,
     target_path: Path | str,
@@ -520,22 +550,21 @@ def materialize_bilingual_outputs(
     ass_path: Path | None = None,
     notes_path: Path | None = None,
     order: str = "zh-first",
-    force: bool = False,
+    shift_seconds: float = 0.0,
 ) -> dict[str, str]:
-    """Ensure requested .bilingual.srt, .bilingual.ass, and .bilingual.md exist for a target SRT."""
-    outputs: dict[str, str] = {}
-    writers = (
-        ("bilingual_srt", bilingual_path, write_bilingual_srt),
-        ("bilingual_ass", ass_path, write_bilingual_ass),
-        ("bilingual_md", notes_path, write_bilingual_markdown),
+    """Regenerate requested exports from the current target using aligned source cues."""
+    if bilingual_path is None and ass_path is None and notes_path is None:
+        return {}
+    # Export filenames can be shared across targets, offsets, and line orderings.
+    # Rebuild them without rerunning translation; file existence alone proves nothing.
+    return _write_bilingual_outputs(
+        shift_cues(parse_subtitles(source_path), shift_seconds),
+        parse_subtitles(target_path),
+        bilingual_path=bilingual_path,
+        ass_path=ass_path,
+        notes_path=notes_path,
+        order=order,
     )
-    for key, out_path, writer in writers:
-        if out_path is None:
-            continue
-        if not out_path.exists() or force:
-            writer(source_path, target_path, out_path, order=order)
-        outputs[key] = str(out_path)
-    return outputs
 
 
 def validate_pair(
@@ -849,29 +878,16 @@ def translate_srt(source_path: Path | str, target_path: Path | str, *, model: st
     if problems:
         raise RuntimeError("translation validation failed: " + "; ".join(problems))
     write_srt(target_path, translated)
-    if bilingual_path is not None:
-        resolved_bilingual = Path(bilingual_path)
-        write_srt(resolved_bilingual, build_bilingual_cues(cues, translated, order=bilingual_order))
-        stats["bilingual_srt"] = str(resolved_bilingual)
-    if ass_path is not None:
-        resolved_ass = Path(ass_path)
-        _atomic_text(
-            resolved_ass,
-            render_bilingual_ass(cues, translated, order=bilingual_order, title=resolved_ass.stem),
+    stats.update(
+        _write_bilingual_outputs(
+            cues,
+            translated,
+            bilingual_path=Path(bilingual_path) if bilingual_path is not None else None,
+            ass_path=Path(ass_path) if ass_path is not None else None,
+            notes_path=Path(notes_path) if notes_path is not None else None,
+            order=bilingual_order,
         )
-        stats["bilingual_ass"] = str(resolved_ass)
-    if notes_path is not None:
-        resolved_notes = Path(notes_path)
-        _atomic_text(
-            resolved_notes,
-            render_bilingual_markdown(
-                cues,
-                translated,
-                order=bilingual_order,
-                title=strip_subtitle_lang_suffix(resolved_notes.stem),
-            ),
-        )
-        stats["bilingual_md"] = str(resolved_notes)
+    )
     if resolved_glossary:
         stats["glossary_count"] = len(resolved_glossary)
     if shift_seconds:
