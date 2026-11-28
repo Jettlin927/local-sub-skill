@@ -586,7 +586,7 @@ def _run_translation_stage(
                 ass_path=bilingual_ass,
                 notes_path=bilingual_md,
                 order=run_args.bilingual_order,
-                force=bool(run_args.force or run_args.force_translate),
+                shift_seconds=shift_val,
             )
         )
         print(f"reuse target subtitle: {target_srt}", flush=True)

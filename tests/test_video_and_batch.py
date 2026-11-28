@@ -56,6 +56,76 @@ class VideoAndBatchTests(unittest.TestCase):
         self.assertEqual(local.parse_srt(bilingual)[0].text, "Hello world.\n你好，世界。")
         self.assertIn("Dialogue: 0,0:00:01.00,0:00:02.00", ass_file.read_text(encoding="utf-8"))
 
+    def test_reused_shifted_video_exports_all_bilingual_formats(self):
+        video = self.root / "clip.mp4"
+        video.touch()
+        source = self.root / "clip.en.srt"
+        target = self.root / "clip.zh.srt"
+        original_timing = "00:00:01,000 --> 00:00:02,000"
+        shifted_timing = "00:00:02,500 --> 00:00:03,500"
+        local.write_srt(source, [local.Cue("1", original_timing, "Hello.")])
+        local.write_srt(target, [local.Cue("1", shifted_timing, "你好。")])
+        args = single.build_parser().parse_args([
+            str(video), "--workspace", str(self.root), "--language", "en",
+            "--shift", "1.5", "--bilingual", "--ass", "--notes",
+        ])
+
+        with mock.patch.object(single, "translate_srt") as translate:
+            result = single.run_video_pipeline(args.video, args)
+        translate.assert_not_called()
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["translation"]["reused"])
+        cue = local.parse_srt(result["bilingual_srt"])[0]
+        self.assertEqual((cue.timing, cue.text), (shifted_timing, "你好。\nHello."))
+        self.assertIn("0:00:02.50,0:00:03.50", Path(result["bilingual_ass"]).read_text(encoding="utf-8"))
+        self.assertIn("`00:00:02` **你好。**", Path(result["bilingual_md"]).read_text(encoding="utf-8"))
+        self.assertEqual(local.parse_srt(source)[0].timing, original_timing)
+
+    def test_reused_shifted_standalone_subtitle_exports_bilingual_srt(self):
+        source = self.root / "clip.ja.vtt"
+        source.write_text("WEBVTT\n\n00:01.000 --> 00:02.000\nこんにちは。\n", encoding="utf-8")
+        local.write_srt(
+            self.root / "clip.zh.srt", [local.Cue("1", "00:00:00,000 --> 00:00:00,500", "你好。")]
+        )
+        args = run_batch.build_batch_parser().parse_args([
+            str(self.root), "--workspace", str(self.root), "--shift", "-1.5", "--bilingual",
+        ])
+
+        with mock.patch.object(run_batch, "translate_srt") as translate:
+            result = run_batch.run_subtitle_job(source, args)
+        translate.assert_not_called()
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["translation"]["reused"])
+        cue = local.parse_srt(result["bilingual_srt"])[0]
+        self.assertEqual((cue.timing, cue.text), ("00:00:00,000 --> 00:00:00,500", "你好。\nこんにちは。"))
+
+    def test_burn_uses_current_target_when_bilingual_ass_already_exists(self):
+        video = self.root / "clip.mp4"
+        video.touch()
+        for lang, line in (("ja", "こんにちは。"), ("en", "English marker."), ("zh", "中文标记。")):
+            local.write_srt(self.root / f"clip.{lang}.srt", [local.Cue("1", "00:00:01,000 --> 00:00:02,000", line)])
+        parser = single.build_parser()
+        common = [str(video), "--workspace", str(self.root), "--ass"]
+        english = single.run_video_pipeline(video, parser.parse_args([*common, "--target", "en"]))
+        self.assertIn("English marker.", Path(english["bilingual_ass"]).read_text(encoding="utf-8"))
+        burned = self.root / "clip.burned.mp4"
+
+        def capture_burn(_, subtitle, output_video):
+            self.assertEqual(output_video, burned)
+            text = subtitle.read_text(encoding="utf-8")
+            self.assertIn("中文标记。", text)
+            self.assertNotIn("English marker.", text)
+            return output_video
+
+        args = parser.parse_args([*common, "--target", "zh", "--burn"])
+        with mock.patch.object(single, "burn_subtitles", side_effect=capture_burn) as burn:
+            with mock.patch.object(single, "translate_srt") as translate:
+                result = single.run_video_pipeline(video, args)
+        burn.assert_called_once()
+        translate.assert_not_called()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["burned_video"], str(burned))
+
     def test_batch_discovers_sorted_videos_skips_hidden_and_supports_continue_on_error(self):
         (self.root / "ep02.mkv").write_bytes(b"v2")
         (self.root / "ep01.mp4").write_bytes(b"v1")
